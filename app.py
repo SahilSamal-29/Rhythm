@@ -56,15 +56,111 @@ def analyze_sentiment():
 
     return jsonify(sentiment)
 
+@app.route('/api/breathing_exercise', methods=['POST'])
+def start_breathing_exercise():
+    """Starts a guided breathing exercise."""
+    exercise_type = request.json.get('type', '4-7-8')
+    
+    exercises = {
+        '4-7-8': {
+            'name': '4-7-8 Breathing',
+            'description': 'Inhale for 4, hold for 7, exhale for 8',
+            'cycles': 4,
+            'instructions': [
+                "Breathe in slowly through your nose for 4 counts",
+                "Hold your breath for 7 counts", 
+                "Exhale slowly through your mouth for 8 counts",
+                "Repeat this cycle 4 times"
+            ]
+        },
+        'box': {
+            'name': 'Box Breathing',
+            'description': 'Equal inhale, hold, exhale, hold',
+            'cycles': 5,
+            'instructions': [
+                "Inhale for 4 counts",
+                "Hold for 4 counts",
+                "Exhale for 4 counts", 
+                "Hold for 4 counts",
+                "Repeat 5 times"
+            ]
+        },
+        'calm': {
+            'name': 'Calming Breath',
+            'description': 'Slow, deep breathing for relaxation',
+            'cycles': 6,
+            'instructions': [
+                "Take a slow, deep breath in for 5 counts",
+                "Exhale slowly for 6 counts",
+                "Focus on the rhythm of your breathing",
+                "Repeat 6 times"
+            ]
+        }
+    }
+    
+    exercise = exercises.get(exercise_type, exercises['4-7-8'])
+    
+    # Log this mindfulness activity
+    timestamp = datetime.datetime.now().isoformat()
+    user_activity_log.append({
+        "timestamp": timestamp, 
+        "activity": f"Completed {exercise['name']} breathing exercise"
+    })
+    
+    return jsonify(exercise)
+
+@app.route('/api/mindfulness_tip', methods=['GET'])
+def get_mindfulness_tip():
+    """Returns a personalized mindfulness tip based on time of day and recent activity."""
+    current_hour = datetime.datetime.now().hour
+    
+    tips = {
+        'morning': [
+            "Start your day with gratitude. Write down three things you're grateful for.",
+            "Take 5 deep breaths before checking your phone or email.",
+            "Set an intention for your day. What do you want to focus on?",
+            "Do a quick body scan - notice how you feel physically and emotionally."
+        ],
+        'afternoon': [
+            "Take a mindful walk. Notice the sounds, smells, and sensations around you.",
+            "Practice the 5-4-3-2-1 grounding technique: 5 things you see, 4 you can touch, 3 you hear, 2 you smell, 1 you taste.",
+            "Do a quick breathing exercise to reset your energy.",
+            "Check in with yourself - how is your stress level? What do you need right now?"
+        ],
+        'evening': [
+            "Reflect on one good thing that happened today.",
+            "Practice progressive muscle relaxation before bed.",
+            "Write down any worries or thoughts to clear your mind.",
+            "Do a gentle stretching routine to release tension."
+        ]
+    }
+    
+    if current_hour < 12:
+        time_period = 'morning'
+    elif current_hour < 18:
+        time_period = 'afternoon'
+    else:
+        time_period = 'evening'
+    
+    import random
+    tip = random.choice(tips[time_period])
+    
+    return jsonify({
+        "tip": tip,
+        "time_period": time_period,
+        "timestamp": datetime.datetime.now().isoformat()
+    })
+
 @app.route('/api/synthesis', methods=['POST'])
 def generate_synthesis():
     activities = request.json.get('activities', [])
 
     if not activities:
-        return jsonify({"summary": "No activity was logged today. Start a Flow Block or write a journal entry to see your synthesis."})
+        return jsonify({"summary": "No activity was logged today. Start a Flow Block, try a breathing exercise, or write a journal entry to see your synthesis."})
 
     flow_blocks = [a for a in activities if "Flow Block" in a['activity']]
     journal_entries = [a for a in activities if "journal entry" in a['activity']]
+    breathing_exercises = [a for a in activities if "breathing exercise" in a['activity']]
 
     high_energy_tasks = sum(1 for a in flow_blocks if "High" in a['activity'])
     medium_energy_tasks = sum(1 for a in flow_blocks if "Medium" in a['activity'])
@@ -77,8 +173,21 @@ def generate_synthesis():
         total_tasks = len(flow_blocks)
         summary_parts.append(f"\n\n- *Productivity*: You powered through {total_tasks} focus session{'s' if total_tasks > 1 else ''}. This included {high_energy_tasks} high-energy, {medium_energy_tasks} medium-energy, and {low_energy_tasks} low-energy tasks. Your dedication to deep work is clear.")
     
+    if breathing_exercises:
+        summary_parts.append(f"\n- *Mindfulness*: Great job taking care of your mental well-being! You completed {len(breathing_exercises)} breathing exercise{'s' if len(breathing_exercises) > 1 else ''} today. This shows you're prioritizing both productivity and peace of mind.")
+    
     if journal_entries:
-        polarities = [float(a['activity'].split(': ')[-1]) for a in journal_entries if ': ' in a['activity']]
+        # Extract polarities from journal entries that have sentiment data
+        polarities = []
+        for entry in journal_entries:
+            if 'polarity:' in entry['activity']:
+                try:
+                    # Extract polarity value from entries like "Wrote a journal entry with polarity: 0.5"
+                    polarity_str = entry['activity'].split('polarity: ')[-1]
+                    polarities.append(float(polarity_str))
+                except (ValueError, IndexError):
+                    continue
+        
         avg_polarity = sum(polarities) / len(polarities) if polarities else 0
         
         sentiment_adjective = "positive"
@@ -89,8 +198,13 @@ def generate_synthesis():
             
         summary_parts.append(f"\n- *Well-being*: You took time for reflection. Your journal entries indicate a generally {sentiment_adjective} mindset today (average sentiment: {avg_polarity:.2f}).")
 
-    if high_energy_tasks > 2:
-        recommendation = "You tackled some major tasks today. Consider starting tomorrow with a medium-energy task to ease into your day."
+    # Enhanced AI recommendations based on activity patterns
+    if high_energy_tasks > 2 and len(breathing_exercises) == 0:
+        recommendation = "You tackled some major tasks today! Consider adding a breathing exercise to your routine to help manage stress and maintain balance."
+    elif len(breathing_exercises) > 0 and high_energy_tasks == 0:
+        recommendation = "You focused on mindfulness today. Tomorrow might be a great time to tackle a high-energy task while maintaining your calm mindset."
+    elif high_energy_tasks > 2 and len(breathing_exercises) > 0:
+        recommendation = "Excellent balance! You're successfully combining productivity with mindfulness. Keep up this integrated approach."
     else:
         recommendation = "It was a balanced day. Tomorrow looks like a great opportunity to tackle a high-energy task in the morning when your focus is at its peak."
         
@@ -347,6 +461,24 @@ HTML_TEMPLATE = """
                 <div id="sentimentResult" style="margin-top: 1rem; padding: 1rem; background: #f0f0f0; border-radius: 8px; display: none;"></div>
             </div>
             
+            <div class="card">
+                <h2>Mindfulness</h2>
+                <div style="margin-bottom: 1rem;">
+                    <button id="getMindfulnessTip" style="margin-right: 0.5rem;">Get Daily Tip</button>
+                    <button id="startBreathing">Breathing Exercise</button>
+                </div>
+                <div id="mindfulnessContent" style="padding: 1rem; background: #f8f9ff; border-radius: 8px; min-height: 100px;">
+                    Click "Get Daily Tip" for personalized mindfulness advice.
+                </div>
+                <div id="breathingExercise" style="margin-top: 1rem; padding: 1rem; background: #e8f5e8; border-radius: 8px; display: none;">
+                    <h3 id="breathingTitle"></h3>
+                    <p id="breathingDescription"></p>
+                    <div id="breathingInstructions"></div>
+                    <div id="breathingTimer" style="font-size: 2rem; text-align: center; margin: 1rem 0; color: #2d5a2d;"></div>
+                    <button id="startBreathingTimer" style="display: none;">Start Exercise</button>
+                </div>
+            </div>
+            
             <div class="card synthesis-section">
                 <h2>Daily Synthesis</h2>
                 <button id="generateSynthesis" style="margin-bottom: 1rem;">Generate Today's Summary</button>
@@ -383,6 +515,17 @@ HTML_TEMPLATE = """
             const generateSynthesisBtn = document.getElementById('generateSynthesis');
             const synthesisContent = document.getElementById('synthesisContent');
             const modeBtns = document.querySelectorAll('.mode-btn');
+            
+            // Mindfulness elements
+            const getMindfulnessTipBtn = document.getElementById('getMindfulnessTip');
+            const startBreathingBtn = document.getElementById('startBreathing');
+            const mindfulnessContent = document.getElementById('mindfulnessContent');
+            const breathingExercise = document.getElementById('breathingExercise');
+            const breathingTitle = document.getElementById('breathingTitle');
+            const breathingDescription = document.getElementById('breathingDescription');
+            const breathingInstructions = document.getElementById('breathingInstructions');
+            const breathingTimer = document.getElementById('breathingTimer');
+            const startBreathingTimerBtn = document.getElementById('startBreathingTimer');
 
             // Timer modes
             const modes = {
@@ -588,6 +731,93 @@ HTML_TEMPLATE = """
                 .catch(err => console.error('Error generating synthesis:', err));
             };
 
+            // Mindfulness functions
+            const getMindfulnessTip = () => {
+                fetch('/api/mindfulness_tip')
+                    .then(res => res.json())
+                    .then(data => {
+                        mindfulnessContent.innerHTML = `
+                            <strong>${data.time_period.charAt(0).toUpperCase() + data.time_period.slice(1)} Mindfulness Tip:</strong><br>
+                            ${data.tip}
+                        `;
+                    })
+                    .catch(err => console.error('Error getting mindfulness tip:', err));
+            };
+
+            const startBreathingExercise = () => {
+                const exerciseTypes = ['4-7-8', 'box', 'calm'];
+                const randomType = exerciseTypes[Math.floor(Math.random() * exerciseTypes.length)];
+                
+                fetch('/api/breathing_exercise', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ type: randomType })
+                })
+                .then(res => res.json())
+                .then(data => {
+                    breathingExercise.style.display = 'block';
+                    breathingTitle.textContent = data.name;
+                    breathingDescription.textContent = data.description;
+                    breathingInstructions.innerHTML = data.instructions.map(instruction => 
+                        `<div style="margin: 0.5rem 0;">• ${instruction}</div>`
+                    ).join('');
+                    startBreathingTimerBtn.style.display = 'inline-block';
+                    breathingTimer.textContent = 'Ready to begin';
+                })
+                .catch(err => console.error('Error starting breathing exercise:', err));
+            };
+
+            const startBreathingTimer = () => {
+                const exerciseTypes = ['4-7-8', 'box', 'calm'];
+                const randomType = exerciseTypes[Math.floor(Math.random() * exerciseTypes.length)];
+                
+                fetch('/api/breathing_exercise', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ type: randomType })
+                })
+                .then(res => res.json())
+                .then(data => {
+                    let cycle = 0;
+                    let step = 0;
+                    const steps = ['Inhale', 'Hold', 'Exhale', 'Hold'];
+                    let currentStep = 0;
+                    
+                    const timer = setInterval(() => {
+                        if (cycle >= data.cycles) {
+                            clearInterval(timer);
+                            breathingTimer.textContent = 'Exercise Complete! 🧘‍♀️';
+                            startBreathingTimerBtn.textContent = 'Start Again';
+                            return;
+                        }
+                        
+                        if (currentStep < steps.length) {
+                            breathingTimer.textContent = `${steps[currentStep]}...`;
+                            currentStep++;
+                        } else {
+                            cycle++;
+                            currentStep = 0;
+                            if (cycle < data.cycles) {
+                                breathingTimer.textContent = `Cycle ${cycle + 1} of ${data.cycles}`;
+                            }
+                        }
+                    }, 2000);
+                    
+                    startBreathingTimerBtn.disabled = true;
+                    startBreathingTimerBtn.textContent = 'In Progress...';
+                    
+                    setTimeout(() => {
+                        startBreathingTimerBtn.disabled = false;
+                        startBreathingTimerBtn.textContent = 'Start Exercise';
+                    }, data.cycles * 8 * 2000);
+                })
+                .catch(err => console.error('Error starting breathing timer:', err));
+            };
+
             // Event listeners
             const setupEventListeners = () => {
                 startBtn.addEventListener('click', startTimer);
@@ -601,6 +831,11 @@ HTML_TEMPLATE = """
                 analyzeSentimentBtn.addEventListener('click', analyzeSentiment);
                 saveJournalBtn.addEventListener('click', saveJournal);
                 generateSynthesisBtn.addEventListener('click', generateSynthesis);
+                
+                // Mindfulness event listeners
+                getMindfulnessTipBtn.addEventListener('click', getMindfulnessTip);
+                startBreathingBtn.addEventListener('click', startBreathingExercise);
+                startBreathingTimerBtn.addEventListener('click', startBreathingTimer);
             };
 
             // Initialize the app
