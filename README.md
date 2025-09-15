@@ -76,6 +76,10 @@ Base URL: `http://127.0.0.1:5000`
 - Journal: Write a note and click Analyze Sentiment. The result logs polarity for synthesis.
 - Mindfulness: Get a tip or start the breathing exercise. The 4-7-8 timer shows a per-second countdown through each step.
 
+## Images
+<img width="1951" height="2005" alt="image" src="https://github.com/user-attachments/assets/fa411c56-5b54-4fa7-9a40-0796a4a87308" />
+
+
 ## Development Notes
 - All data is in-memory; restarting the server resets tasks and logs.
 - Frontend is embedded in `app.py` via `render_template_string` for simplicity.
