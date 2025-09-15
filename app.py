@@ -24,6 +24,25 @@ def get_tasks():
     """Simulates fetching tasks from integrated services."""
     return jsonify({"tasks": mock_tasks})
 
+@app.route('/api/tasks', methods=['POST'])
+def add_task():
+    """Adds a new task to the in-memory list."""
+    data = request.json or {}
+    title = (data.get('title') or '').strip()
+    source = (data.get('source') or '').strip() or 'Me'
+    cognitive_load = (data.get('cognitive_load') or '').strip().capitalize() or 'Medium'
+
+    if not title:
+        return jsonify({"status": "error", "message": "Title is required"}), 400
+
+    if cognitive_load not in {"High", "Medium", "Low"}:
+        return jsonify({"status": "error", "message": "cognitive_load must be High, Medium, or Low"}), 400
+
+    next_id = (max([t["id"] for t in mock_tasks]) + 1) if mock_tasks else 1
+    new_task = {"id": next_id, "title": title, "source": source, "cognitive_load": cognitive_load}
+    mock_tasks.append(new_task)
+    return jsonify({"status": "success", "task": new_task}), 201
+
 @app.route('/api/log_activity', methods=['POST'])
 def log_activity():
     """Logs user activities for the daily synthesis."""
@@ -446,9 +465,17 @@ HTML_TEMPLATE = """
             
             <div class="card">
                 <h2>Tasks</h2>
-                <div class="task-list" id="taskList">
-                    <!-- Tasks will be loaded here -->
+                <div style="display:flex; gap:0.5rem; margin-bottom:0.75rem; align-items:center;">
+                    <input id="taskSearch" placeholder="Search tasks..." style="flex:1; padding:0.6rem 0.8rem; border:1px solid #333; background:#111; color:#eee; border-radius:8px;" />
+                    <button id="addTaskBtn" title="Add task" style="width:42px; height:42px; display:flex; align-items:center; justify-content:center; font-size:1.2rem;">+</button>
                 </div>
+                <select id="loadFilter" style="width:100%; padding:0.6rem 0.8rem; border-radius:8px; margin-bottom:0.75rem;">
+                    <option value="all">All Loads</option>
+                    <option value="High">High</option>
+                    <option value="Medium">Medium</option>
+                    <option value="Low">Low</option>
+                </select>
+                <div class="task-list" id="taskList"></div>
             </div>
             
             <div class="card journal-section">
@@ -498,7 +525,10 @@ HTML_TEMPLATE = """
                 timeLeft: 25 * 60,
                 isTimerRunning: false,
                 currentMode: 'work',
-                activities: []
+                activities: [],
+                currentExercise: null,
+                breathingTimerHandle: null,
+                breathingStepInterval: null
             };
 
             // DOM elements
@@ -507,6 +537,9 @@ HTML_TEMPLATE = """
             const pauseBtn = document.getElementById('pauseBtn');
             const resetBtn = document.getElementById('resetBtn');
             const taskList = document.getElementById('taskList');
+            const taskSearch = document.getElementById('taskSearch');
+            const loadFilter = document.getElementById('loadFilter');
+            const addTaskBtn = document.getElementById('addTaskBtn');
             const currentTaskDiv = document.getElementById('currentTask');
             const journalText = document.getElementById('journalText');
             const analyzeSentimentBtn = document.getElementById('analyzeSentiment');
@@ -555,7 +588,16 @@ HTML_TEMPLATE = """
             // Render tasks
             const renderTasks = () => {
                 taskList.innerHTML = '';
-                state.tasks.forEach(task => {
+                const query = (taskSearch.value || '').toLowerCase();
+                const filter = loadFilter.value;
+
+                const filtered = state.tasks.filter(t => {
+                    const matchesQuery = t.title.toLowerCase().includes(query) || (t.source || '').toLowerCase().includes(query);
+                    const matchesLoad = filter === 'all' ? true : t.cognitive_load === filter;
+                    return matchesQuery && matchesLoad;
+                });
+
+                filtered.forEach(task => {
                     const taskElement = document.createElement('div');
                     taskElement.className = 'task-item';
                     taskElement.innerHTML = `
@@ -566,13 +608,13 @@ HTML_TEMPLATE = """
                             </div>
                         </div>
                     `;
-                    taskElement.addEventListener('click', () => selectTask(task));
+                    taskElement.addEventListener('click', (event) => selectTask(task, event));
                     taskList.appendChild(taskElement);
                 });
             };
 
             // Select task
-            const selectTask = (task) => {
+            const selectTask = (task, event) => {
                 // Remove previous selection
                 document.querySelectorAll('.task-item').forEach(item => {
                     item.classList.remove('selected');
@@ -631,7 +673,8 @@ HTML_TEMPLATE = """
                 pauseBtn.disabled = true;
                 
                 // Log activity
-                const activity = `Flow Block completed: ${state.selectedTask ? state.selectedTask.title : 'No task selected'} (${state.currentMode} mode)`;
+                const energy = state.selectedTask ? state.selectedTask.cognitive_load : 'Unknown';
+                const activity = `Flow Block completed: ${state.selectedTask ? state.selectedTask.title : 'No task selected'} (${state.currentMode} mode, ${energy} energy)`;
                 logActivity(activity);
                 
                 alert('Timer completed! Great work!');
@@ -697,6 +740,8 @@ HTML_TEMPLATE = """
                         Polarity: ${data.polarity} (${data.polarity > 0.1 ? 'Positive' : data.polarity < -0.1 ? 'Negative' : 'Neutral'})<br>
                         Subjectivity: ${data.subjectivity} (${data.subjectivity > 0.5 ? 'Subjective' : 'Objective'})
                     `;
+                    // Log activity with polarity so synthesis can use it
+                    logActivity(`Wrote a journal entry with polarity: ${data.polarity}`);
                 })
                 .catch(err => console.error('Error analyzing sentiment:', err));
             };
@@ -745,15 +790,14 @@ HTML_TEMPLATE = """
             };
 
             const startBreathingExercise = () => {
-                const exerciseTypes = ['4-7-8', 'box', 'calm'];
-                const randomType = exerciseTypes[Math.floor(Math.random() * exerciseTypes.length)];
-                
+                // Always use 4-7-8 per request
+                const chosenType = '4-7-8';
                 fetch('/api/breathing_exercise', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({ type: randomType })
+                    body: JSON.stringify({ type: chosenType })
                 })
                 .then(res => res.json())
                 .then(data => {
@@ -765,57 +809,65 @@ HTML_TEMPLATE = """
                     ).join('');
                     startBreathingTimerBtn.style.display = 'inline-block';
                     breathingTimer.textContent = 'Ready to begin';
+                    state.currentExercise = data;
                 })
                 .catch(err => console.error('Error starting breathing exercise:', err));
             };
 
             const startBreathingTimer = () => {
-                const exerciseTypes = ['4-7-8', 'box', 'calm'];
-                const randomType = exerciseTypes[Math.floor(Math.random() * exerciseTypes.length)];
-                
-                fetch('/api/breathing_exercise', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ type: randomType })
-                })
-                .then(res => res.json())
-                .then(data => {
-                    let cycle = 0;
-                    let step = 0;
-                    const steps = ['Inhale', 'Hold', 'Exhale', 'Hold'];
-                    let currentStep = 0;
-                    
-                    const timer = setInterval(() => {
-                        if (cycle >= data.cycles) {
-                            clearInterval(timer);
-                            breathingTimer.textContent = 'Exercise Complete! 🧘‍♀️';
-                            startBreathingTimerBtn.textContent = 'Start Again';
-                            return;
-                        }
-                        
-                        if (currentStep < steps.length) {
-                            breathingTimer.textContent = `${steps[currentStep]}...`;
-                            currentStep++;
-                        } else {
-                            cycle++;
-                            currentStep = 0;
-                            if (cycle < data.cycles) {
-                                breathingTimer.textContent = `Cycle ${cycle + 1} of ${data.cycles}`;
-                            }
-                        }
-                    }, 2000);
-                    
-                    startBreathingTimerBtn.disabled = true;
-                    startBreathingTimerBtn.textContent = 'In Progress...';
-                    
-                    setTimeout(() => {
+                const data = state.currentExercise;
+                if (!data) {
+                    alert('Please load the breathing exercise first.');
+                    return;
+                }
+
+                // Configure durations per step in seconds
+                // For 4-7-8: Inhale 4, Hold 7, Exhale 8
+                const stepLabels = ['Inhale', 'Hold', 'Exhale'];
+                const stepDurations = [4, 7, 8];
+                const totalCycles = data.cycles || 4;
+
+                // Cleanup any existing timers
+                if (state.breathingTimerHandle) clearTimeout(state.breathingTimerHandle);
+                if (state.breathingStepInterval) clearInterval(state.breathingStepInterval);
+
+                startBreathingTimerBtn.disabled = true;
+                startBreathingTimerBtn.textContent = 'In Progress...';
+
+                let currentCycle = 1;
+                let currentStepIndex = 0;
+
+                const runStep = () => {
+                    if (currentCycle > totalCycles) {
+                        if (state.breathingStepInterval) clearInterval(state.breathingStepInterval);
+                        breathingTimer.textContent = 'Exercise Complete! 🧘‍♀️';
                         startBreathingTimerBtn.disabled = false;
-                        startBreathingTimerBtn.textContent = 'Start Exercise';
-                    }, data.cycles * 8 * 2000);
-                })
-                .catch(err => console.error('Error starting breathing timer:', err));
+                        startBreathingTimerBtn.textContent = 'Start Again';
+                        return;
+                    }
+
+                    const label = `${stepLabels[currentStepIndex]} (Cycle ${currentCycle}/${totalCycles})`;
+                    let secondsLeft = stepDurations[currentStepIndex];
+                    breathingTimer.textContent = `${label}: ${secondsLeft}s`;
+
+                    if (state.breathingStepInterval) clearInterval(state.breathingStepInterval);
+                    state.breathingStepInterval = setInterval(() => {
+                        secondsLeft -= 1;
+                        breathingTimer.textContent = `${label}: ${secondsLeft}s`;
+                    }, 1000);
+
+                    state.breathingTimerHandle = setTimeout(() => {
+                        clearInterval(state.breathingStepInterval);
+                        currentStepIndex += 1;
+                        if (currentStepIndex >= stepLabels.length) {
+                            currentStepIndex = 0;
+                            currentCycle += 1;
+                        }
+                        runStep();
+                    }, stepDurations[currentStepIndex] * 1000);
+                };
+
+                runStep();
             };
 
             // Event listeners
@@ -836,6 +888,33 @@ HTML_TEMPLATE = """
                 getMindfulnessTipBtn.addEventListener('click', getMindfulnessTip);
                 startBreathingBtn.addEventListener('click', startBreathingExercise);
                 startBreathingTimerBtn.addEventListener('click', startBreathingTimer);
+
+                // Task interactions
+                taskSearch.addEventListener('input', renderTasks);
+                loadFilter.addEventListener('change', renderTasks);
+                addTaskBtn.addEventListener('click', async () => {
+                    const title = prompt('Task title:');
+                    if (!title) return;
+                    const source = prompt('Source (e.g., me, work):', 'me') || 'me';
+                    const load = prompt('Cognitive load (High/Medium/Low):', 'Medium') || 'Medium';
+                    try {
+                        const res = await fetch('/api/tasks', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ title, source, cognitive_load: load })
+                        });
+                        const data = await res.json();
+                        if (!res.ok) {
+                            alert(data.message || 'Failed to add task');
+                            return;
+                        }
+                        state.tasks.push(data.task);
+                        renderTasks();
+                    } catch (e) {
+                        console.error('Error adding task:', e);
+                        alert('Error adding task');
+                    }
+                });
             };
 
             // Initialize the app
