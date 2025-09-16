@@ -6,11 +6,7 @@ app = Flask(__name__)
 
 # --- In-memory storage ---
 user_activity_log = []
-mock_tasks = [
-    {"id": 1, "title": "Write report", "source": "Work", "cognitive_load": "High"},
-    {"id": 2, "title": "Read articles", "source": "Learning", "cognitive_load": "Medium"},
-    {"id": 3, "title": "Check emails", "source": "Communication", "cognitive_load": "Low"},
-]
+mock_tasks = []
 
 # --- API Endpoints ---
 
@@ -42,6 +38,16 @@ def add_task():
     new_task = {"id": next_id, "title": title, "source": source, "cognitive_load": cognitive_load}
     mock_tasks.append(new_task)
     return jsonify({"status": "success", "task": new_task}), 201
+
+@app.route('/api/tasks/<int:task_id>', methods=['DELETE'])
+def delete_task(task_id: int):
+    """Deletes a task by id from the in-memory list."""
+    global mock_tasks
+    existing_ids = {t["id"] for t in mock_tasks}
+    if task_id not in existing_ids:
+        return jsonify({"status": "error", "message": "Task not found"}), 404
+    mock_tasks = [t for t in mock_tasks if t["id"] != task_id]
+    return jsonify({"status": "success", "deleted_id": task_id}), 200
 
 @app.route('/api/log_activity', methods=['POST'])
 def log_activity():
@@ -253,6 +259,23 @@ HTML_TEMPLATE = """
             color: #333;
         }
         
+        /* Top bar */
+        .top-bar {
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 0.75rem;
+        }
+        .theme-toggle {
+            background: rgba(255,255,255,0.2);
+            border: 2px solid rgba(255,255,255,0.7);
+            color: white;
+            padding: 8px 14px;
+            border-radius: 999px;
+            font-size: 0.95rem;
+        }
+        
         .container {
             max-width: 1200px;
             margin: 0 auto;
@@ -367,6 +390,26 @@ HTML_TEMPLATE = """
             font-size: 0.8rem;
             font-weight: bold;
         }
+
+        /* Small transparent delete button */
+        .delete-task {
+            background: transparent !important;
+            border: none !important;
+            color: #666;
+            padding: 4px 6px !important;
+            border-radius: 6px;
+            font-size: 0.9rem !important;
+            width: 28px;
+            height: 28px;
+            line-height: 1;
+        }
+        .delete-task:hover {
+            background: rgba(239, 68, 68, 0.08) !important; /* red-500 @ 8% */
+            color: #ef4444; /* red-500 */
+            transform: none !important;
+        }
+        body[data-theme="dark"] .delete-task { color: #9ca3af; }
+        body[data-theme="dark"] .delete-task:hover { background: rgba(239, 68, 68, 0.15) !important; color: #f87171; }
         
         .cognitive-load.High {
             background: #ff6b6b;
@@ -426,6 +469,31 @@ HTML_TEMPLATE = """
             color: #667eea;
         }
         
+        /* Dark theme */
+        body[data-theme="dark"] {
+            background: #0f172a;
+            color: #e5e7eb;
+        }
+        body[data-theme="dark"] h1 {
+            color: #e5e7eb;
+            text-shadow: none;
+        }
+        body[data-theme="dark"] .card {
+            background: #111827;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+        }
+        body[data-theme="dark"] .timer-display { color: #a5b4fc; }
+        body[data-theme="dark"] .task-item { border-color: #374151; }
+        body[data-theme="dark"] .task-item:hover { background: #111827; border-color: #4f46e5; }
+        body[data-theme="dark"] .task-item.selected { background: #4f46e5; color: white; }
+        body[data-theme="dark"] .task-meta { color: #9ca3af; }
+        body[data-theme="dark"] .journal-textarea { background: #0b1220; color: #e5e7eb; border-color: #374151; }
+        body[data-theme="dark"] .synthesis-section { background: #0b1220; }
+        body[data-theme="dark"] #mindfulnessContent { background: #0b1220; }
+        body[data-theme="dark"] #breathingExercise { background: #0b2015; }
+        body[data-theme="dark"] .mode-btn { border-color: #e5e7eb; color: #e5e7eb; }
+        body[data-theme="dark"] .mode-btn.active { background: #e5e7eb; color: #4f46e5; }
+        
         @media (max-width: 768px) {
             .main-content {
                 grid-template-columns: 1fr;
@@ -443,6 +511,9 @@ HTML_TEMPLATE = """
 </head>
 <body>
     <div class="container">
+        <div class="top-bar">
+            <button id="themeToggle" class="theme-toggle" title="Toggle theme">Dark mode</button>
+        </div>
         <h1>Rhythm</h1>
         
         <div class="mode-selector">
@@ -460,13 +531,18 @@ HTML_TEMPLATE = """
                     <button id="pauseBtn" disabled>Pause</button>
                     <button id="resetBtn">Reset</button>
                 </div>
+                <div style="display:flex; gap:0.5rem; justify-content:center; align-items:center; margin-top:0.5rem;">
+                    <label for="customMinutes" style="font-size:0.95rem;">Set minutes:</label>
+                    <input type="number" id="customMinutes" min="1" max="180" placeholder="25" style="width:80px; padding:0.4rem 0.5rem; border:1px solid #ccc; border-radius:8px;" />
+                    <button id="applyCustom">Apply</button>
+                </div>
                 <div id="currentTask" style="margin-top: 1rem; font-style: italic; color: #666;"></div>
             </div>
             
             <div class="card">
                 <h2>Tasks</h2>
                 <div style="display:flex; gap:0.5rem; margin-bottom:0.75rem; align-items:center;">
-                    <input id="taskSearch" placeholder="Search tasks..." style="flex:1; padding:0.6rem 0.8rem; border:1px solid #333; background:#111; color:#eee; border-radius:8px;" />
+                    <input id="taskSearch" placeholder="Search tasks..." style="flex:1; padding:0.6rem 0.8rem; border:1px solid #ccc; background:#fff; color:#333; border-radius:8px;" />
                     <button id="addTaskBtn" title="Add task" style="width:42px; height:42px; display:flex; align-items:center; justify-content:center; font-size:1.2rem;">+</button>
                 </div>
                 <select id="loadFilter" style="width:100%; padding:0.6rem 0.8rem; border-radius:8px; margin-bottom:0.75rem;">
@@ -541,6 +617,9 @@ HTML_TEMPLATE = """
             const loadFilter = document.getElementById('loadFilter');
             const addTaskBtn = document.getElementById('addTaskBtn');
             const currentTaskDiv = document.getElementById('currentTask');
+            const themeToggle = document.getElementById('themeToggle');
+            const customMinutesInput = document.getElementById('customMinutes');
+            const applyCustomBtn = document.getElementById('applyCustom');
             const journalText = document.getElementById('journalText');
             const analyzeSentimentBtn = document.getElementById('analyzeSentiment');
             const saveJournalBtn = document.getElementById('saveJournal');
@@ -561,17 +640,22 @@ HTML_TEMPLATE = """
             const startBreathingTimerBtn = document.getElementById('startBreathingTimer');
 
             // Timer modes
+            const persistedModes = JSON.parse(localStorage.getItem('modes') || '{}');
             const modes = {
-                work: 25 * 60,
-                break: 5 * 60,
-                'long-break': 15 * 60
+                work: Number(persistedModes.work) || 25 * 60,
+                break: Number(persistedModes.break) || 5 * 60,
+                'long-break': Number(persistedModes['long-break']) || 15 * 60
             };
 
             // Initialize
             const init = () => {
+                const savedTheme = localStorage.getItem('theme') || 'light';
+                setTheme(savedTheme);
+                state.timeLeft = modes[state.currentMode];
                 loadTasks();
                 updateTimerDisplay();
                 setupEventListeners();
+                customMinutesInput.placeholder = Math.floor(modes[state.currentMode] / 60).toString();
             };
 
             // Load tasks from API
@@ -601,14 +685,47 @@ HTML_TEMPLATE = """
                     const taskElement = document.createElement('div');
                     taskElement.className = 'task-item';
                     taskElement.innerHTML = `
-                        <div class="task-info">
+                        <div class="task-info" style="flex:1;">
                             <h3>${task.title}</h3>
                             <div class="task-meta">
                                 ${task.source} • <span class="cognitive-load ${task.cognitive_load}">${task.cognitive_load}</span>
                             </div>
                         </div>
+                        <div style="display:flex; gap:0.5rem;">
+                            <button class="delete-task" data-id="${task.id}" title="Delete">🗑️</button>
+                        </div>
                     `;
-                    taskElement.addEventListener('click', (event) => selectTask(task, event));
+                    // Select task when clicking on the row but not on buttons
+                    taskElement.addEventListener('click', (event) => {
+                        const target = event.target;
+                        const isButton = target instanceof Element && target.closest('button');
+                        if (isButton) return;
+                        selectTask(task, event);
+                    });
+                    // Delete handling
+                    const deleteBtn = taskElement.querySelector('.delete-task');
+                    deleteBtn.addEventListener('click', async (e) => {
+                        e.stopPropagation();
+                        if (!confirm('Delete this task?')) return;
+                        try {
+                            const res = await fetch(`/api/tasks/${task.id}`, { method: 'DELETE' });
+                            const data = await res.json();
+                            if (!res.ok) {
+                                alert(data.message || 'Failed to delete task');
+                                return;
+                            }
+                            // Update local state
+                            state.tasks = state.tasks.filter(t => t.id !== task.id);
+                            if (state.selectedTask && state.selectedTask.id === task.id) {
+                                state.selectedTask = null;
+                                currentTaskDiv.textContent = '';
+                            }
+                            renderTasks();
+                        } catch (err) {
+                            console.error('Error deleting task:', err);
+                            alert('Error deleting task');
+                        }
+                    });
                     taskList.appendChild(taskElement);
                 });
             };
@@ -698,6 +815,45 @@ HTML_TEMPLATE = """
                         btn.classList.add('active');
                     }
                 });
+                customMinutesInput.placeholder = Math.floor(modes[mode] / 60).toString();
+            };
+
+            // Theme handling
+            const setTheme = (theme) => {
+                document.body.setAttribute('data-theme', theme === 'dark' ? 'dark' : 'light');
+                themeToggle.textContent = theme === 'dark' ? 'Light mode' : 'Dark mode';
+                localStorage.setItem('theme', theme);
+                if (theme === 'dark') {
+                    taskSearch.style.background = '#111';
+                    taskSearch.style.color = '#eee';
+                    taskSearch.style.borderColor = '#333';
+                } else {
+                    taskSearch.style.background = '#fff';
+                    taskSearch.style.color = '#333';
+                    taskSearch.style.borderColor = '#ccc';
+                }
+            };
+            const toggleTheme = () => {
+                const current = localStorage.getItem('theme') || 'light';
+                setTheme(current === 'dark' ? 'light' : 'dark');
+            };
+
+            // Custom timer per mode
+            const applyCustomMinutes = () => {
+                const value = Number(customMinutesInput.value);
+                if (!value || value <= 0) {
+                    alert('Enter a valid number of minutes.');
+                    return;
+                }
+                if (state.isTimerRunning && !confirm('Timer is running. Apply new duration and reset?')) return;
+                const seconds = Math.floor(value * 60);
+                modes[state.currentMode] = seconds;
+                const toPersist = { work: modes.work, break: modes.break, 'long-break': modes['long-break'] };
+                localStorage.setItem('modes', JSON.stringify(toPersist));
+                state.timeLeft = seconds;
+                updateTimerDisplay();
+                customMinutesInput.value = '';
+                customMinutesInput.placeholder = String(value);
             };
 
             // Activity logging
@@ -879,6 +1035,9 @@ HTML_TEMPLATE = """
                 modeBtns.forEach(btn => {
                     btn.addEventListener('click', () => switchMode(btn.dataset.mode));
                 });
+                themeToggle.addEventListener('click', toggleTheme);
+                applyCustomBtn.addEventListener('click', applyCustomMinutes);
+                customMinutesInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') applyCustomMinutes(); });
                 
                 analyzeSentimentBtn.addEventListener('click', analyzeSentiment);
                 saveJournalBtn.addEventListener('click', saveJournal);
