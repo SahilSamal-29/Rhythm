@@ -87,8 +87,7 @@ Base URL: `http://127.0.0.1:5000`
 - Theme: Use the top-right toggle to switch between light and dark. Preference persists locally.
 
 ## Images
-<img width="1951" height="2005" alt="image" src="https://github.com/user-attachments/assets/fa411c56-5b54-4fa7-9a40-0796a4a87308" />
-
+<img width="1886" height="2476" alt="image" src="https://github.com/user-attachments/assets/5a187b8e-51bc-40aa-b13c-e34887a0a915" />
 
 ## Development Notes
 - All data is in-memory; restarting the server resets tasks and logs.
