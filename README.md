@@ -2,6 +2,9 @@
 
 Rhythm is a lightweight Flask web app that combines a focus timer, simple task management, journaling with sentiment analysis, and mindfulness tools (including a proper 4-7-8 breathing guide).
 
+## Working demo
+https://drive.google.com/file/d/1REUu2x-Dk8Uf3STc9_RkBnhBAFH53adf/view?usp=drive_link
+
 ## Quick Start
 
 ### Prerequisites
